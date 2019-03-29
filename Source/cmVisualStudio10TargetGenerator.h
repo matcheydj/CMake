@@ -196,6 +196,7 @@ private:
     vcxproj,
     csproj
   } ProjectType;
+  std::string ProjectTag;
   bool InSourceBuild;
   std::vector<std::string> Configurations;
   std::vector<TargetsFileAndConfigs> TargetsFileAndConfigsVec;

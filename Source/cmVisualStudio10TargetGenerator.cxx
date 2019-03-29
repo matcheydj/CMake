@@ -326,6 +326,10 @@ void cmVisualStudio10TargetGenerator::Generate()
     }
     this->ProjectType = csproj;
     this->Managed = true;
+    if(auto projType = this->GeneratorTarget->Target->GetProperty("VS_PROJECT_TYPE"))
+    {
+      this->ProjectTag = projType;
+    }
   }
   // Tell the global generator the name of the project file
   this->GeneratorTarget->Target->SetProperty("GENERATOR_FILE_NAME",
@@ -376,17 +380,23 @@ void cmVisualStudio10TargetGenerator::Generate()
                   << "\n";
   {
     Elem e0(BuildFileStream, "Project");
-    e0.Attribute("DefaultTargets", "Build");
-    const char* toolsVersion = this->GlobalGenerator->GetToolsVersion();
-    if (this->GlobalGenerator->GetVersion() ==
-          cmGlobalVisualStudioGenerator::VS12 &&
+    if (this->ProjectTag.empty())
+    {
+      e0.Attribute("DefaultTargets", "Build");
+      const char* toolsVersion = this->GlobalGenerator->GetToolsVersion();
+      if (this->GlobalGenerator->GetVersion() ==
+        cmGlobalVisualStudioGenerator::VS12 &&
         this->GlobalGenerator->TargetsWindowsCE()) {
-      toolsVersion = "4.0";
+        toolsVersion = "4.0";
+      }
+      e0.Attribute("ToolsVersion", toolsVersion);
+      e0.Attribute("xmlns",
+        "http://schemas.microsoft.com/developer/msbuild/2003");
     }
-    e0.Attribute("ToolsVersion", toolsVersion);
-    e0.Attribute("xmlns",
-                 "http://schemas.microsoft.com/developer/msbuild/2003");
-
+    else
+    {
+      e0.Attribute("Sdk", this->ProjectTag);
+    }
     if (this->NsightTegra) {
       Elem e1(e0, "PropertyGroup");
       e1.Attribute("Label", "NsightTegraProject");
@@ -576,12 +586,14 @@ void cmVisualStudio10TargetGenerator::Generate()
       }
     }
 
-    switch (this->ProjectType) {
+    if (this->ProjectTag.empty())
+    {
+      switch (this->ProjectType) {
       case vcxproj:
         if (this->GlobalGenerator->GetPlatformToolsetVersion()) {
           Elem(e0, "Import")
             .Attribute("Project",
-                       this->GlobalGenerator->GetAuxiliaryToolset());
+              this->GlobalGenerator->GetAuxiliaryToolset());
         }
         Elem(e0, "Import").Attribute("Project", VS10_CXX_DEFAULT_PROPS);
         break;
@@ -590,6 +602,7 @@ void cmVisualStudio10TargetGenerator::Generate()
           .Attribute("Project", VS10_CSharp_DEFAULT_PROPS)
           .Attribute("Condition", "Exists('" VS10_CSharp_DEFAULT_PROPS "')");
         break;
+      }
     }
 
     this->WriteProjectConfigurationValues(e0);
@@ -628,6 +641,7 @@ void cmVisualStudio10TargetGenerator::Generate()
         Elem(e1, "Import").Attribute("Project", propsLocal);
       }
     }
+    if(this->ProjectTag.empty())
     {
       Elem e1(e0, "ImportGroup");
       e1.Attribute("Label", "PropertySheets");
@@ -667,17 +681,21 @@ void cmVisualStudio10TargetGenerator::Generate()
     this->WriteWinRTReferences(e0);
     this->WriteProjectReferences(e0);
     this->WriteSDKReferences(e0);
-    switch (this->ProjectType) {
+    if (this->ProjectTag.empty())
+    {
+      switch (this->ProjectType) {
       case vcxproj:
         Elem(e0, "Import").Attribute("Project", VS10_CXX_TARGETS);
         break;
       case csproj:
         if (this->GlobalGenerator->TargetsWindowsCE()) {
           Elem(e0, "Import").Attribute("Project", VS10_CSharp_NETCF_TARGETS);
-        } else {
+        }
+        else {
           Elem(e0, "Import").Attribute("Project", VS10_CSharp_TARGETS);
         }
         break;
+      }
     }
 
     this->WriteTargetSpecificReferences(e0);
@@ -786,7 +804,12 @@ void cmVisualStudio10TargetGenerator::WriteDotNetReference(
   Elem& e1, std::string const& ref, std::string const& hint,
   std::string const& config)
 {
-  Elem e2(e1, "Reference");
+  std::string tagName = "Reference";
+  if(!this->ProjectTag.empty())
+  {
+    tagName = "PackageReference";
+  }
+  Elem e2(e1, tagName.c_str());
   // If 'config' is not empty, the reference is only added for the given
   // configuration. This is used when referencing imported managed assemblies.
   // See also cmVisualStudio10TargetGenerator::AddLibraries().
@@ -794,8 +817,15 @@ void cmVisualStudio10TargetGenerator::WriteDotNetReference(
     e2.Attribute("Condition", this->CalcCondition(config));
   }
   e2.Attribute("Include", ref);
-  e2.Element("CopyLocalSatelliteAssemblies", "true");
-  e2.Element("ReferenceOutputAssembly", "true");
+  if (this->ProjectTag.empty())
+  {
+    e2.Element("CopyLocalSatelliteAssemblies", "true");
+    e2.Element("ReferenceOutputAssembly", "true");
+  }
+  else
+  {
+    e2.Attribute("Version", "2.2.0");
+  }
   if (!hint.empty()) {
     const char* privateReference = "True";
     if (const char* value = this->GeneratorTarget->GetProperty(
